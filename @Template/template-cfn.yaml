@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create VPC
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # Resources
+  #-----------------------------------------------------------#
