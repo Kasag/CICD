@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create CodeCommit
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+  RepositoryName:
+    Description: The repository name
+    Type: String
+    Default: front
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # CodeCommit
+  #-----------------------------------------------------------#
+  CodeCommit:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Sub ${Project}-${EnvCode}-${RepositoryName}

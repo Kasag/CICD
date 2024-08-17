@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create CMK
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # CMK
+  #-----------------------------------------------------------#
+  S3Key:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for S3
+      PendingWindowInDays: 7
+      EnableKeyRotation: false
+      KeyPolicy: 
+        Version: '2012-10-17'
+        Id: !Sub "${Project}-${EnvCode}-s3-key"
+        Statement: [
+          {
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+          },
+          {
+            "Sid": "Allow CloudFront to use the key to delivet logs",
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "delivery.logs.amazonaws.com"
+            },
+            "Action": [
+              "kms:GenerateDataKey",
+              "kms:Decrypt"
+            ],
+            "Resource": "*"
+          }
+        ]
+
+  #-----------------------------------------------------------#
+  # CMK Alias
+  #-----------------------------------------------------------#
+  S3KeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${Project}-${EnvCode}-s3-key"
+      TargetKeyId: !Ref S3Key
+
+  #-----------------------------------------------------------#
+  # IAM Policy
+  #-----------------------------------------------------------#
+  GetS3KeyPolicy:
+      Type: AWS::IAM::ManagedPolicy
+      Properties:
+        ManagedPolicyName: !Sub "${Project}-${EnvCode}-get-s3-key-policy"
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement: [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "kms:Decrypt",
+                "kms:GenerateDataKey*",
+              ],
+              "Resource": !GetAtt S3Key.Arn
+            }
+          ]
+
+#-----------------------------------------------------------#
+# Outputs
+#-----------------------------------------------------------#
+Outputs:
+  S3KeyArn:
+    Description: The ARN of the S3 key
+    Value: !GetAtt S3Key.Arn
+    Export:
+      Name: !Sub "${Project}-${EnvCode}-s3-key-arn"
+
+  S3Key:
+    Description: The ID of the KMS key for S3 encryption
+    Value: !Ref S3Key
+    Export:
+      Name: !Sub "${Project}-${EnvCode}-s3-key"
+  
+  GetS3KeyPolicy:
+    Description: The IAM policy to get the S3 key
+    Value: !Ref GetS3KeyPolicy
+    Export:
+      Name: !Sub "${Project}-${EnvCode}-get-s3-key-policy"
