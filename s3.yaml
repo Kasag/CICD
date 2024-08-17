@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create VPC
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+  # ExipartionInDays:
+  #   Description: The expiration days for the objects in the bucket
+  #   Type: Number
+  #   Default: 7
+  BucketName:
+    Description: The bucket name
+    Type: String
+    Default: data-upload
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # S3 to store Uploaded files
+  #-----------------------------------------------------------#
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Project}-${EnvCode}-${BucketName}-bucket
+      VersioningConfiguration:
+        Status: Suspended
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: { "Fn::ImportValue": !Sub "${Project}-${EnvCode}-s3-key-arn" }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # LifecycleConfiguration:
+      #   Rules:
+      #     - Id: !Sub ExpirationIn-${ExipartionInDays}Days
+      #       Status: Enabled
+      #       ExpirationInDays: !Ref ExipartionInDays
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-${BucketName}-bucket
+
+  #-----------------------------------------------------------#
+  # IAM
+  #-----------------------------------------------------------#
+  UploadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy to upload files to the bucket
+      ManagedPolicyName: !Sub ${Project}-${EnvCode}-data-upload-s3-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Resource: 
+              - !Sub arn:aws:s3:::${UploadBucket}/*
+              - !Sub arn:aws:s3:::${UploadBucket}
+            Action: 
+              - s3:PutObject
+              - s3:GetObject
+              - s3:DeleteObject
+              
+#-----------------------------------------------------------#
+# Outputs
+#-----------------------------------------------------------#
+Outputs:  
+  UploadDataPolicy:
+    Description: The IAM policy to upload to S3
+    Value: !Ref UploadPolicy
+    Export:
+      Name: !Sub "${Project}-${EnvCode}-data-upload-s3-policy"

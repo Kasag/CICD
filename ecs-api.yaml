@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create ECS for API
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+  UploadPolicyArn:
+    Description: The Arn of policy for uploading files
+    Type: String
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # ECS
+  #-----------------------------------------------------------#
+  # Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${Project}-${EnvCode}-api-ecs-cluster
+  
+  #-----------------------------------------------------------#
+  # IAM
+  #-----------------------------------------------------------#
+  # Role for Task Exection
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-${EnvCode}-api-ecs-task-execution-role
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+  
+  # Policy for Task Execution
+  TaskExecutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${Project}-${EnvCode}-api-ecs-task-execution-policy
+      PolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${Project}-${EnvCode}-api-ecs-task:*
+      Roles:
+        - !Ref TaskExecutionRole
+
+  # Role for Task
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-${EnvCode}-api-ecs-task-role
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - !Ref UploadPolicyArn
+  
