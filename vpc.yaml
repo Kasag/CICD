@@ -20,6 +20,7 @@ Parameters:
         - dev
         - stg
         - prd
+
   # Optional parameters
   VpcCIDR:
     Description: The CIDR block for the VPC
@@ -69,6 +70,12 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${Project}-${EnvCode}-internet-gateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
 
   #-----------------------------------------------------------#
   # IP for NAT Gateway
@@ -191,7 +198,6 @@ Resources:
         - Key: Name
           Value: !Sub ${Project}-${EnvCode}-private-subnet-db-c
   
-  
   #-----------------------------------------------------------#
   # Route Table
   #-----------------------------------------------------------#
@@ -246,7 +252,6 @@ Resources:
         - Key: Name
           Value: !Sub ${Project}-${EnvCode}-route-table-db-c
 
-
   #-----------------------------------------------------------#
   # Route
   #-----------------------------------------------------------#
@@ -255,14 +260,14 @@ Resources:
     Type: AWS::EC2::Route
     Properties:
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGatewayA
+      GatewayId: !Ref InternetGateway
       RouteTableId: !Ref RouteTablePublicA
 
   RoutePublicC:
     Type: AWS::EC2::Route
     Properties:
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGatewayC
+      GatewayId: !Ref InternetGateway
       RouteTableId: !Ref RouteTablePublicC
 
   # private subnet (server)
@@ -287,7 +292,6 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGatewayA
       RouteTableId: !Ref RouteTableDBA
-
 
   RouteDBC:
     Type: AWS::EC2::Route
@@ -337,3 +341,15 @@ Resources:
     Properties:
       RouteTableId: !Ref RouteTableDBC
       SubnetId: !Ref PrivateSubnetDBC
+
+  #-----------------------------------------------------------#
+  # DHCP Options
+  #-----------------------------------------------------------#
+  DHCPOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: !Sub ${Project}-${EnvCode}.local
+      DomainNameServers: 
+        - !Ref "AWS::Region"
+      NtpServers: 
+        -

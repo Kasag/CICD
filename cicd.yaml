@@ -1,0 +1,483 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create CI/CD pipeline for front
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+  Vpc:
+    Description: The VPC ID
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-007c718d10de2baa0
+  
+  SubnetsList:
+    Description: The List of subnet ID (choose two)
+    Type: List<AWS::EC2::Subnet::Id>
+
+  BuildEnvironmentImage:
+    Description: |
+      Build environment image name used by CodeBuild
+      https://docs.aws.amazon.com/ja_jp/codebuild/latest/userguide/build-env-ref-available.html
+    Type: String
+    Default: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+
+  Branch:
+    Description: The branch name
+    Type: String
+    Default: main
+
+  BuildSpecFileName:
+    Description: The buildspec file name
+    Type: String
+    Default: buildspec.yml
+
+  KMSKey:
+    Description: The KMS key ID
+    Type: String
+  
+  GetKeyPolicy:
+    Description: The policy arn to get KMS key
+    Type: String
+
+  ExipartionInDays:
+    Description: The expiration days for the objects in the bucket
+    Type: Number
+    Default: 7
+  
+  GitHubFullRepositoryId:
+    Description: The GitHub full repository ID (username/repository)
+    Type: String
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # CodeBuild
+  #-----------------------------------------------------------#
+  # for CodePipeline
+  CodeBuildCiCd:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: CodeBuild for SPA
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        BuildSpec: !Ref BuildSpecFileName
+        Type: CODEPIPELINE
+        GitCloneDepth: 1
+      SourceVersion: refs/heads/master
+      Cache:
+        Type: S3
+        Location: !Sub arn:aws:s3:::${ArtifactBucket}/cache/codebuild
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !Ref BuildEnvironmentImage
+        EnvironmentVariables:
+          - Name: ENV_CODE
+            Type: PLAINTEXT
+            Value: !Ref EnvCode
+          - Name: ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Ref AWS::AccountId
+          - Name: FRONT_BUCKET
+            Type: PLAINTEXT
+            Value: !Ref AppBucket
+        PrivilegedMode: false
+      LogsConfig:
+          CloudWatchLogs:
+            Status: DISABLED
+          S3Logs:
+              Status: ENABLED
+              Location: !Sub ${LogBucket}/build-log
+      Name: !Sub ${Project}-${EnvCode}-frontend-build
+      VpcConfig:
+        VpcId: !Ref Vpc
+        Subnets: !Ref SubnetsList
+        SecurityGroupIds: [
+          !Ref CodeBuildCiCdSecurityGroup        
+        ]
+      ServiceRole: !Ref RoleCodeBuildCiCd
+
+    
+    # for Test
+    # TODO
+
+  #-----------------------------------------------------------#
+  # IAM role
+  #-----------------------------------------------------------#
+  # CodeBuild role in CI/CD
+  RoleCodeBuildCiCd:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-${EnvCode}-frontend-cicd-codebuild-role
+      Path: /
+      AssumeRolePolicyDocument: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "codebuild.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+      ManagedPolicyArns:
+        - !Ref GetKeyPolicy
+      Policies:
+        - PolicyName: !Sub ${Project}-${EnvCode}-frontend-cicd-codebuild-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # for artifact bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+              # for logging
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${LogBucket}/*
+              # for app deployment
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                Resource: !Sub arn:aws:s3:::${AppBucket}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${AppBucket}
+              # for codebuild report
+              - Effect: Allow
+                Action:
+                  - codebuild:CreateReportGroup
+                  - codebuild:CreateReport
+                  - codebuild:UpdateReport
+                  - codebuild:BatchPutTestCases
+                  - codebuild:BatchPutCodeCoverages
+                Resource: !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/${Project}-${EnvCode}-frontend-build-*
+              #  for build
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DeleteDhcpOptions
+                  - ec2:CreateNetworkInterface
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterfacePermission
+                Condition:
+                  StringEquals:
+                    ec2:Subnet:
+                      - !Sub 
+                        - arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SubnetId}
+                        - SubnetId: !Select [ 0, !Ref SubnetsList ]
+                      - !Sub 
+                        - arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SubnetId}
+                        - SubnetId: !Select [ 1, !Ref SubnetsList ]
+                    ec2:AuthorizedService:
+                      - codebuild.amazonaws.com
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+
+  # CodeBuild role in Testing
+  # TODO
+
+  # CodePipeline role
+  RoleCodePipeline:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Project}-${EnvCode}-frontend-codepipeline-role
+      Path: /
+      AssumeRolePolicyDocument: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "codepipeline.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+      Policies:
+        - PolicyName: !Sub ${Project}-${EnvCode}-frontend-codepipeline-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # for Frontend bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${AppBucket}/*
+              # for Artifact bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+              # for CodeBuild
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:StopBuild
+                  - codebuild:BatchGet*
+                  - codebuild:Get*
+                  - codebuild:List*
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetRepository
+                  - codecommit:ListBranches
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:CancelUploadArchive
+                  - s3:GetBucketLocation
+                  - s3:ListAllMyBuckets
+                  - iam:PassRole
+                Resource: "*"
+              # for publish SNS
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: "*"
+              # for github
+              - Effect: Allow
+                Action:
+                  - codeconnections:CreateConnection
+                  - codeconnections:DeleteConnection
+                  - codeconnections:GetConnection
+                  - codeconnections:ListConnections
+                  - codeconnections:GetInstallationUrl
+                  - codeconnections:GetIndividualAccessToken
+                  - codeconnections:ListInstallationTargets
+                  - codeconnections:StartOAuthHandshake
+                  - codeconnections:UpdateConnectionInstallation
+                  - codeconnections:UseConnection
+                  - codestar-connections:*
+                Resource: "*"
+
+  #-----------------------------------------------------------#
+  # Security Group
+  #-----------------------------------------------------------#
+  # for CodeBuild in CI/CD
+  CodeBuildCiCdSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Project}-${EnvCode}-frontend-cicd-codebuild-sg
+      GroupDescription: Security group for CodeBuild in CI/CD
+      SecurityGroupEgress:
+          - CidrIp: 0.0.0.0/0
+            IpProtocol: "-1"
+      VpcId: !Ref Vpc
+
+  # for CodeBuild in Testing
+  CodeBuildTestingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Project}-${EnvCode}-frontend-testing-codebuild-sg
+      GroupDescription: Security group for CodeBuild in Testing
+      SecurityGroupEgress:
+          - CidrIp: 0.0.0.0/0
+            IpProtocol: "-1"
+      VpcId: !Ref Vpc
+
+  #-----------------------------------------------------------#
+  # CodePipeline
+  #-----------------------------------------------------------#
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${Project}-${EnvCode}-frontend-pipeline
+      RoleArn: !GetAtt RoleCodePipeline.Arn
+      ArtifactStore:
+          Type: S3
+          Location: !Ref ArtifactBucket 
+      Stages:
+        - Name: SourceAction
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                FullRepositoryId: !Ref GitHubFullRepositoryId
+                ConnectionArn: !GetAtt GitHubConnection.ConnectionArn
+                BranchName: !Ref Branch
+                DetectChanges: true
+              RunOrder: 1
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BatchEnabled: false
+                CombineArtifacts: false
+                ProjectName: !Ref CodeBuildCiCd
+              RunOrder: 2
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-frontend-pipeline
+  
+  #-----------------------------------------------------------#
+  # S3 for artifact of CodeBuild 
+  #-----------------------------------------------------------#
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Project}-${EnvCode}-frontend-pipeline-artifact-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSKey
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-frontend-pipeline-artifact-bucket
+
+  #-----------------------------------------------------------#
+  # S3 for Frontend
+  #-----------------------------------------------------------#
+  AppBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Project}-${EnvCode}-app
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Suspended
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-app
+          
+
+  #-----------------------------------------------------------#
+  # S3 for logs
+  #-----------------------------------------------------------#
+  # Build log: CodeBuild in CI/CD
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Project}-${EnvCode}-frontend-cicd-codebuild-log-bucket
+      VersioningConfiguration:
+        Status: Suspended
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: { "Fn::ImportValue": !Sub "${Project}-${EnvCode}-s3-key-arn" }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: !Sub ExpirationIn-${ExipartionInDays}Days
+            Status: Enabled
+            ExpirationInDays: !Ref ExipartionInDays
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-frontend-cicd-codebuild-log-bucket
+
+  # Access log: Frontend bucket
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Project}-${EnvCode}-frontend-access-logs
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - Id: !Sub ExpirationIn-${ExipartionInDays}Days
+            Status: Enabled
+            ExpirationInDays: !Ref ExipartionInDays
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-frontend-access-logs
+
+  #-----------------------------------------------------------#
+  # AWS CodeStar Connections
+  #-----------------------------------------------------------#
+  GitHubConnection:
+      Type: AWS::CodeStarConnections::Connection
+      Properties:
+        ConnectionName: GitHub-Connection
+        ProviderType: GitHub
