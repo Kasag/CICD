@@ -71,6 +71,26 @@ Resources:
       AliasName: !Sub "alias/${Project}-${EnvCode}-s3-key"
       TargetKeyId: !Ref S3Key
 
+  #-----------------------------------------------------------#
+  # IAM Policy
+  #-----------------------------------------------------------#
+  GetS3KeyPolicy:
+      Type: AWS::IAM::ManagedPolicy
+      Properties:
+        ManagedPolicyName: !Sub "${Project}-${EnvCode}-get-s3-key-policy"
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement: [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "kms:Decrypt",
+                "kms:GenerateDataKey*",
+              ],
+              "Resource": !GetAtt S3Key.Arn
+            }
+          ]
+
 #-----------------------------------------------------------#
 # Outputs
 #-----------------------------------------------------------#
@@ -86,3 +106,9 @@ Outputs:
     Value: !Ref S3Key
     Export:
       Name: !Sub "${Project}-${EnvCode}-s3-key"
+  
+  GetS3KeyPolicy:
+    Description: The IAM policy to get the S3 key
+    Value: !Ref GetS3KeyPolicy
+    Export:
+      Name: !Sub "${Project}-${EnvCode}-get-s3-key-policy"
