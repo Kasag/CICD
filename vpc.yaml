@@ -1,0 +1,339 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: A template to create VPC
+
+#-------------------------------------------------------------#
+# Parameters
+#-------------------------------------------------------------#
+Parameters:
+  # Required parameters
+  Project:
+    Description: The project name
+    Type: String
+    Default: kasa
+  
+  EnvCode:
+    Description: The environment code
+    Type: String
+    Default: dev
+    AllowedValues:
+        - dev
+        - stg
+        - prd
+  # Optional parameters
+  VpcCIDR:
+    Description: The CIDR block for the VPC
+    Type: String
+    Default:  10.0.0.0/21
+
+  PublicSubnetACIDR:
+    Description: The CIDR block for the public subnet in Availability Zone A
+    Type: String
+    Default: 10.0.2.0/25
+
+  PublicSubnetCCIDR:
+    Description: The CIDR block for the public subnet in Availability Zone C
+    Type: String
+    Default: 10.0.2.128/25
+
+  PrivateSubnetDBACIDR:
+    Description: The CIDR block for the private subnet in Availability Zone A
+    Type: String
+    Default: 10.0.4.0/25
+
+  PrivateSubnetDBCCIDR:
+    Description: The CIDR block for the private subnet in Availability Zone C
+    Type: String
+    Default: 10.0.4.128/25
+
+  PrivateSubnetServerACIDR:
+    Description: The CIDR block for the private subnet in Availability Zone A
+    Type: String
+    Default: 10.0.6.0/25
+
+  PrivateSubnetServerCCIDR:
+    Description: The CIDR block for the private subnet in Availability Zone C
+    Type: String
+    Default: 10.0.6.128/25
+
+#-------------------------------------------------------------#
+# Resources
+#-------------------------------------------------------------#
+Resources:
+  #-----------------------------------------------------------#
+  # InternetGateway
+  #-----------------------------------------------------------#
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-internet-gateway
+
+  #-----------------------------------------------------------#
+  # IP for NAT Gateway
+  #-----------------------------------------------------------#
+  IPforNatGatewayA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-ip-nat-gateway-a
+  
+  IPforNatGatewayC:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-ip-nat-gateway-c
+
+  #-----------------------------------------------------------#
+  # NAT Gateway
+  #-----------------------------------------------------------#
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt IPforNatGatewayA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-nat-gateway-a
+  
+  NatGatewayC:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt IPforNatGatewayC.AllocationId
+      SubnetId: !Ref PublicSubnetC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-nat-gateway-c
+
+  #-----------------------------------------------------------#
+  # VPC
+  #-----------------------------------------------------------#
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-vpc
+
+  #-----------------------------------------------------------#
+  # Subnet
+  #-----------------------------------------------------------#
+  # public subnet
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PublicSubnetACIDR
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-public-subnet-a
+
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Ref PublicSubnetCCIDR
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-public-subnet-c
+
+  # private subnet (server)
+  PrivateSubnetServerA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PrivateSubnetServerACIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-private-subnet-server-a
+
+  PrivateSubnetServerC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Ref PrivateSubnetServerCCIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-private-subnet-server-c
+
+  # private subnet (db)
+  PrivateSubnetDBA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PrivateSubnetDBACIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-private-subnet-db-a
+  
+  PrivateSubnetDBC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Ref PrivateSubnetDBCCIDR
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-private-subnet-db-c
+  
+  
+  #-----------------------------------------------------------#
+  # Route Table
+  #-----------------------------------------------------------#
+  # public subnet
+  RouteTablePublicA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-route-table-public-a
+
+  RouteTablePublicC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-route-table-public-c
+
+  # private subnet (server)
+  RouteTableServerA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-route-table-server-a
+
+  RouteTableServerC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-route-table-server-c
+
+  # private subnet (db)
+  RouteTableDBA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-route-table-db-a
+
+  RouteTableDBC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Project}-${EnvCode}-route-table-db-c
+
+
+  #-----------------------------------------------------------#
+  # Route
+  #-----------------------------------------------------------#
+  # public subnet
+  RoutePublicA:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+      RouteTableId: !Ref RouteTablePublicA
+
+  RoutePublicC:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayC
+      RouteTableId: !Ref RouteTablePublicC
+
+  # private subnet (server)
+  RouteServerA:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+      RouteTableId: !Ref RouteTableServerA
+
+  RouteServerC:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayC
+      RouteTableId: !Ref RouteTableServerC
+
+  # private subnet (db)
+  RouteDBA:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+      RouteTableId: !Ref RouteTableDBA
+
+
+  RouteDBC:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayC
+      RouteTableId: !Ref RouteTableDBC
+  
+  #-----------------------------------------------------------#
+  # Route Table Association
+  #-----------------------------------------------------------#
+  # public subnet
+  RouteTableAssociationPublicA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTablePublicA
+      SubnetId: !Ref PublicSubnetA
+  
+  RouteTableAssociationPublicC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTablePublicC
+      SubnetId: !Ref PublicSubnetC
+  
+  # private subnet (server)
+  RouteTableAssociationServerA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTableServerA
+      SubnetId: !Ref PrivateSubnetServerA
+  
+  RouteTableAssociationServerC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTableServerC
+      SubnetId: !Ref PrivateSubnetServerC
+  
+  # private subnet (db)
+  RouteTableAssociationDBA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTableDBA
+      SubnetId: !Ref PrivateSubnetDBA
+  
+  RouteTableAssociationDBC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTableDBC
+      SubnetId: !Ref PrivateSubnetDBC
