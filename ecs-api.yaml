@@ -21,8 +21,44 @@ Parameters:
         - stg
         - prd
   # Optional parameters
+  Vpc:
+    Description: The VPC
+    Type: AWS::EC2::VPC::Id
+
+  ListServerSubnets:
+    Description: The List of server subnets in Availability Zone A (choose 2 subnets)
+    Type: List<AWS::EC2::Subnet::Id>
+
+  UsageCode:
+    Description: The usage code
+    Type: String
+    Default: api
+
   UploadPolicyArn:
     Description: The Arn of policy for uploading files
+    Type: String
+  
+  DesiredTaskCount:
+    Description: The desired task count
+    Type: Number
+    Default: 1
+  
+  EcsImageName:
+    Description: The image name for ECS
+    Type: String
+  
+  TaskMemory:
+    Description: The task memory
+    Type: Number
+    Default: 512
+
+  TaskCpu:  
+    Description: The task cpu
+    Type: Number
+    Default: 512
+  
+  AuroraSecrets:
+    Description: The secrets to connect to Aurora
     Type: String
 
 #-------------------------------------------------------------#
@@ -33,11 +69,85 @@ Resources:
   # ECS
   #-----------------------------------------------------------#
   # Cluster
-  ECSCluster:
+  EcsCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub ${Project}-${EnvCode}-api-ecs-cluster
+      ClusterName: !Sub ${Project}-${EnvCode}-${UsageCode}-ecs-cluster
   
+  # Service
+  EcsService:
+    Type: AWS::ECS::Service
+    # DependsOn: AlbListner
+    Properties:
+      Cluster: !Ref EcsCluster
+      HealthCheckGracePeriodSeconds: 60
+      ServiceName: !Sub ${Project}-${EnvCode}-${UsageCode}-ecs-service
+      TaskDefinition: !Ref Definition
+      DesiredCount: !Ref DesiredTaskCount
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8080
+          # TargetGroupArn: !Ref HttpTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+          Subnets: !Ref ListServerSubnets
+
+  # Task Definition
+  Definition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${Project}-${EnvCode}-${UsageCode}-task-definition
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      NetworkMode: awsvpc
+      Memory: !Ref TaskMemory
+      Cpu: !Ref TaskCpu
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+      # Container Definitions
+      ContainerDefinitions:
+        - Name: !Sub ${Project}-${EnvCode}-${UsageCode}-container
+          Image: !Ref EcsImageName
+          Memory: 512
+          PortMappings:
+            - ContainerPort: 8080
+          # LogConfiguration:
+          #   LogDriver: awslogs
+          #   Options:
+          #     awslogs-group: !Sub ${Project}-${EnvCode}-${UsageCode}-ecs-task
+          #     awslogs-region: !Ref AWS::Region
+          #     awslogs-stream-prefix: ecs
+          Essential: true
+          # Environment:
+          #   - Name: SPRING_FLYWAY_URL
+          #     Value: !Sub jdbc:postgresql://${RdsClusterName}:5432
+          Secrets:
+            - Name: SPRING_R2DBC_PASSWORD
+              ValueFrom: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${AuroraSecrets}:password::"
+  
+  #-----------------------------------------------------------#
+  # Security Group
+  #-----------------------------------------------------------#
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${Project}-${EnvCode}-ecs-${UsageCode}-security-group
+      GroupDescription: Security Group for ECS
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
   #-----------------------------------------------------------#
   # IAM
   #-----------------------------------------------------------#
@@ -45,7 +155,7 @@ Resources:
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${Project}-${EnvCode}-api-ecs-task-execution-role
+      RoleName: !Sub ${Project}-${EnvCode}-${UsageCode}-ecs-task-execution-role
       AssumeRolePolicyDocument: |
         {
           "Version": "2012-10-17",
@@ -64,7 +174,7 @@ Resources:
   TaskExecutionPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub ${Project}-${EnvCode}-api-ecs-task-execution-policy
+      PolicyName: !Sub ${Project}-${EnvCode}-${UsageCode}-ecs-task-execution-policy
       PolicyDocument: 
         Version: 2012-10-17
         Statement:
@@ -72,7 +182,7 @@ Resources:
             Action:
               - logs:CreateLogStream
               - logs:PutLogEvents
-            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${Project}-${EnvCode}-api-ecs-task:*
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${Project}-${EnvCode}-${UsageCode}-ecs-task:*
       Roles:
         - !Ref TaskExecutionRole
 
@@ -80,7 +190,7 @@ Resources:
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${Project}-${EnvCode}-api-ecs-task-role
+      RoleName: !Sub ${Project}-${EnvCode}-${UsageCode}-ecs-task-role
       AssumeRolePolicyDocument: |
         {
           "Version": "2012-10-17",
@@ -97,4 +207,60 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
         - !Ref UploadPolicyArn
+  
+  #-----------------------------------------------------------#
+  # ALB
+  #-----------------------------------------------------------#
+  # # listner
+  # AlbListner:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties:
+  #     DefaultActions:
+  #       # https://docs.aws.amazon.com/ja_jp/elasticloadbalancing/latest/application/load-balancer-listeners.html#rule-action-types
+  #       - Type: fixed-response
+  #         FixedResponseConfig:
+  #           StatusCode: 403
+  #           MessageBody: No authorized Access.
+  #           ContentType: text/plain
+  #     # LoadBalancerArn: !Ref AlbArn
+  #     Port: 443
+  #     Protocol: HTTPS
+  #     SslPolicy: ELBSecurityPolicy-FS-1-2-Res-2020-10
+
+  # # listner rule 
+  # AlbListnerRule:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   Properties:
+  #     Actions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref HttpTargetGroup
+  #     Priority: 1
+  #     Conditions:
+  #       - Field: path-pattern
+  #         Values:
+  #             - "*"
+
+  # # target group
+  # HttpsTargetGroup:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     Name: !Sub ${Project}-${EnvCode}-${UsageCode}-https-target-group
+  #     HealthCheckIntervalSeconds: 30
+  #     HealthCheckPath: /actuator/health
+  #     HealthCheckProtocol: HTTP
+  #     HealthCheckTimeoutSeconds: 5
+  #     HealthyThresholdCount: 2
+  #     Port: 80
+  #     Protocol: HTTP
+  #     TargetType: ip
+  #     VpcId: !Ref Vpc
+  #     TargetGroupAttributes:
+  #       - Key: deregistration_delay.timeout_seconds
+  #         Value: 300
+  #       - Key: stickiness.enabled
+  #         Value: true
+  #       - Key: stickiness.type
+  #         Value: lb_cookie
+  #       - Key: stickiness.lb_cookie.duration_seconds
+  #         Value: 
   
